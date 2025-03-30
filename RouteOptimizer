@@ -1,0 +1,125 @@
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.web.bind.annotation.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
+
+import java.util.*;
+
+@SpringBootApplication
+public class RouteOptimizerApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(RouteOptimizerApplication.class, args);
+    }
+}
+
+@RestController
+@RequestMapping("/api")
+class RouteController {
+    private final Graph graph = new Graph();
+
+    @PostMapping("/addEdge")
+    public String addEdge(@RequestParam String from, @RequestParam String to, @RequestParam int weight) {
+        graph.addEdge(from, to, weight);
+        return "Edge added: " + from + " - " + to + " (" + weight + ")";
+    }
+
+    @GetMapping("/dijkstra")
+    public Map<String, Integer> getDijkstra(@RequestParam String start) {
+        if (!graph.hasNode(start)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Start node not found in graph");
+        }
+        return graph.dijkstra(start);
+    }
+
+    @GetMapping("/astar")
+    public List<String> getAStar(@RequestParam String start, @RequestParam String end) {
+        if (!graph.hasNode(start) || !graph.hasNode(end)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "One or both nodes not found in graph");
+        }
+        return graph.aStar(start, end);
+    }
+}
+
+class Graph {
+    private static final Logger logger = LoggerFactory.getLogger(Graph.class);
+    private final Map<String, Map<String, Integer>> adjList = new HashMap<>();
+
+    public void addEdge(String from, String to, int weight) {
+        adjList.putIfAbsent(from, new HashMap<>());
+        adjList.putIfAbsent(to, new HashMap<>());
+        adjList.get(from).put(to, weight);
+        adjList.get(to).put(from, weight);
+        logger.info("Added edge: {} -> {} (weight: {})", from, to, weight);
+    }
+
+    public boolean hasNode(String node) {
+        return adjList.containsKey(node);
+    }
+
+    public Map<String, Integer> dijkstra(String start) {
+        Map<String, Integer> distances = new HashMap<>();
+        PriorityQueue<Map.Entry<String, Integer>> pq = new PriorityQueue<>(Map.Entry.comparingByValue());
+        distances.put(start, 0);
+        pq.add(new AbstractMap.SimpleEntry<>(start, 0));
+
+        while (!pq.isEmpty()) {
+            Map.Entry<String, Integer> entry = pq.poll();
+            String node = entry.getKey();
+            int distance = entry.getValue();
+
+            for (Map.Entry<String, Integer> neighbor : adjList.getOrDefault(node, new HashMap<>()).entrySet()) {
+                int newDist = distance + neighbor.getValue();
+                if (newDist < distances.getOrDefault(neighbor.getKey(), Integer.MAX_VALUE)) {
+                    distances.put(neighbor.getKey(), newDist);
+                    pq.add(new AbstractMap.SimpleEntry<>(neighbor.getKey(), newDist));
+                }
+            }
+        }
+        return distances;
+    }
+
+    public List<String> aStar(String start, String goal) {
+        Map<String, Integer> gScore = new HashMap<>();
+        Map<String, Integer> fScore = new HashMap<>();
+        Map<String, String> cameFrom = new HashMap<>();
+        PriorityQueue<Map.Entry<String, Integer>> openSet = new PriorityQueue<>(Map.Entry.comparingByValue());
+
+        gScore.put(start, 0);
+        fScore.put(start, heuristic(start, goal));
+        openSet.add(new AbstractMap.SimpleEntry<>(start, fScore.get(start)));
+
+        while (!openSet.isEmpty()) {
+            String current = openSet.poll().getKey();
+            if (current.equals(goal)) {
+                return reconstructPath(start, goal, cameFrom);
+            }
+
+            for (Map.Entry<String, Integer> neighbor : adjList.getOrDefault(current, new HashMap<>()).entrySet()) {
+                int tentativeGScore = gScore.getOrDefault(current, Integer.MAX_VALUE) + neighbor.getValue();
+                if (tentativeGScore < gScore.getOrDefault(neighbor.getKey(), Integer.MAX_VALUE)) {
+                    cameFrom.put(neighbor.getKey(), current);
+                    gScore.put(neighbor.getKey(), tentativeGScore);
+                    fScore.put(neighbor.getKey(), tentativeGScore + heuristic(neighbor.getKey(), goal));
+                    openSet.add(new AbstractMap.SimpleEntry<>(neighbor.getKey(), fScore.get(neighbor.getKey())));
+                }
+            }
+        }
+        return new ArrayList<>();
+    }
+
+    private int heuristic(String node, String goal) {
+        return Math.abs(node.charAt(0) - goal.charAt(0));
+    }
+
+    private List<String> reconstructPath(String start, String end, Map<String, String> previous) {
+        List<String> path = new ArrayList<>();
+        for (String at = end; at != null; at = previous.get(at)) {
+            path.add(at);
+        }
+        Collections.reverse(path);
+        return path;
+    }
+}
